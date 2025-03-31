@@ -6,6 +6,12 @@ use std::{
     ops::Add,
 };
 
+/*
+*********
+* Point *
+* *******
+* */
+
 #[derive(PartialEq, Debug, Copy, Clone)]
 pub struct Point {
     pub x: f64,
@@ -103,6 +109,24 @@ impl Add for Point {
     }
 }
 
+/*
+***************
+* Point Macro *
+***************
+* this is purely for convenience
+* */
+#[macro_export]
+macro_rules! ec_point {
+    ($x:expr, $y:expr, $a:expr, $b:expr) => {
+        Point::new(($x), ($y), ($a), ($b))
+    };
+}
+
+/*
+*********
+* Tests *
+*********
+* */
 #[cfg(test)]
 mod tests {
     use core::f64;
@@ -160,15 +184,28 @@ mod tests {
     }
 
     #[test]
-    fn add_where_x_ne() {
+    fn test_add_where_x_ne() {
         let p1 = Point::new(2.0, 5.0, 5.0, 7.0);
         let p2 = Point::new(-1.0, -1.0, 5.0, 7.0);
         assert_eq!(p1 + p2, Point::new(3.0, -7.0, 5.0, 7.0));
     }
 
     #[test]
-    fn add_point_to_itself() {
+    fn test_add_point_to_itself() {
         let point = Point::new(-1.0, -1.0, 5.0, 7.0);
         assert_eq!(point + point, Point::new(18.0, 77.0, 5.0, 7.0));
+    }
+
+    #[test]
+    fn test_macro() {
+        let p1 = ec_point!(3.0, 7.0, 5.0, 7.0);
+        let p2 = Point::new(3.0, 7.0, 5.0, 7.0);
+        assert_eq!(p1, p2);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_macro_fail() {
+        let p1 = ec_point!(3.0, 8.0, 5.0, 7.0);
     }
 }

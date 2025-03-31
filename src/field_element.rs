@@ -165,6 +165,24 @@ impl Div for FieldElement {
     }
 }
 
+/*
+**********************
+* FieldElement Macro *
+* ********************
+* this is purely for convenience
+* */
+#[macro_export]
+macro_rules! field_element {
+    ($num:expr, $prime:expr) => {
+        FieldElement::new(($num), ($prime))
+    };
+}
+
+/*
+*********
+* Tests *
+* *******
+* */
 #[cfg(test)] // only include this module when testing
 mod tests {
     // Import the outer scope
@@ -237,5 +255,18 @@ mod tests {
         let element1 = FieldElement::new(12, 19);
         let element2 = FieldElement::new(8, 19);
         assert_eq!(element1 / element2, FieldElement::new(11, 19));
+    }
+
+    #[test]
+    fn test_macro() {
+        let element1 = field_element!(2, 10);
+        let element2 = FieldElement::new(2, 10);
+        assert_eq!(element1, element2);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_macro_fail() {
+        let element = field_element!(20, 19);
     }
 }
