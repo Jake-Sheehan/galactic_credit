@@ -1,6 +1,4 @@
-mod elliptic_curve;
-mod field_element;
-mod math_helpers;
+mod ecc;
 
 fn main() {
     println!("Welcome to the Galactic Empire");

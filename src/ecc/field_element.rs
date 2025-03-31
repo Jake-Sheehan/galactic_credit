@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_variables)]
 
-use crate::math_helpers::mod_pow;
+use super::math_helpers::mod_pow;
 use std::fmt;
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
