@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_variables)]
 
-use super::math_helpers::mod_pow;
+use super::math_helpers::{Pow, Scalable, Zero, f64_to_u64_safe, mod_pow, u64_to_f64_safe};
 use std::fmt;
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
@@ -19,24 +19,6 @@ impl FieldElement {
     pub fn new(num: u64, prime: u64) -> Self {
         assert!(num < prime, "Error: Value is out of range of field");
         Self { num, prime }
-    }
-
-    pub fn pow(&self, exp: i32) -> Self {
-        let mut exp = exp;
-        let prime_i32: i32 = self
-            .prime
-            .try_into()
-            .expect("Error: pow function overflowed");
-        while exp < 0 {
-            exp += prime_i32 - 1;
-        }
-        let exp: u64 = exp.try_into().expect("Error: pow function overflowed");
-        let result = mod_pow(self.num, exp, self.prime);
-
-        Self {
-            num: result,
-            prime: self.prime,
-        }
     }
 }
 
@@ -162,6 +144,46 @@ impl Div for FieldElement {
             num: result,
             prime: self.prime,
         }
+    }
+}
+
+impl Pow for FieldElement {
+    fn pow(self, n: i32) -> Self {
+        let mut exp = n;
+        let prime_i32: i32 = self
+            .prime
+            .try_into()
+            .expect("Error: pow function overflowed");
+        while exp < 0 {
+            exp += prime_i32 - 1;
+        }
+        let exp: u64 = exp.try_into().expect("Error: pow function overflowed");
+        let result = mod_pow(self.num, exp, self.prime);
+
+        Self {
+            num: result,
+            prime: self.prime,
+        }
+    }
+}
+
+impl Scalable for FieldElement {
+    fn scale(self, factor: u64) -> Self {
+        let result = self
+            .num
+            .checked_mul(factor)
+            .expect("Error: FieldElement scale overflowed");
+        let result = result.rem_euclid(self.prime);
+        Self {
+            num: result,
+            prime: self.prime,
+        }
+    }
+}
+
+impl Zero for FieldElement {
+    fn is_zero(&self) -> bool {
+        self.num == 0
     }
 }
 

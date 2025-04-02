@@ -1,10 +1,79 @@
 #![allow(unused)]
 
+use super::field_element::FieldElement;
+use super::math_helpers::{Pow, Scalable, Zero, u64_to_f64_safe};
 use core::f64;
 use std::{
     fmt::{Display, write},
-    ops::Add,
+    ops::{Add, Div, Mul, Neg, Sub},
+    process::Output,
 };
+
+/*
+**********
+* Traits *
+**********
+* */
+pub trait EcRepresentable:
+    PartialEq
+    + Display
+    + Add<Self, Output = Self>
+    + Div<Self, Output = Self>
+    + Mul<Self, Output = Self>
+    + Sub<Self, Output = Self>
+    + Neg<Output = Self>
+    + Pow
+    + Scalable
+    + Zero
+    + Sized
+    + Copy
+    + Clone
+{
+}
+
+impl Pow for f64 {
+    fn pow(self, n: i32) -> Self {
+        f64::powi(self, n)
+    }
+}
+
+impl Zero for f64 {
+    fn is_zero(&self) -> bool {
+        *self == 0.0f64
+    }
+}
+
+impl Scalable for f64 {
+    fn scale(self, factor: u64) -> Self {
+        let n: f64 = u64_to_f64_safe(factor);
+        self * n
+    }
+}
+
+impl EcRepresentable for f64 {}
+
+impl EcRepresentable for FieldElement {}
+
+/*
+*********
+* Enums *
+*********
+* */
+#[derive(Debug, Clone, PartialEq, Copy)]
+pub enum Bounded<T> {
+    Finite(T),
+    Infinity,
+}
+
+impl<T: Display> Display for Bounded<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use Bounded::{Finite, Infinity};
+        match self {
+            Finite(val) => write!(f, "{val}"),
+            Infinity => write!(f, "Infinity"),
+        }
+    }
+}
 
 /*
 *********
@@ -12,100 +81,130 @@ use std::{
 * *******
 * */
 
+// T must be able to be represented as a point on an EC
+// x and y could be infinite, so we use Bounded<T>
 #[derive(PartialEq, Debug, Copy, Clone)]
-pub struct Point {
-    pub x: f64,
-    pub y: f64,
-    pub a: f64,
-    pub b: f64,
+pub struct EcPoint<T: EcRepresentable> {
+    pub x: Bounded<T>,
+    pub y: Bounded<T>,
+    pub a: T,
+    pub b: T,
 }
 
-impl Point {
-    pub fn new(x: f64, y: f64, a: f64, b: f64) -> Self {
-        if x.is_infinite() && y.is_infinite() {
-            return Self { x, y, a, b };
+impl<T: EcRepresentable> EcPoint<T> {
+    pub fn new(x: Bounded<T>, y: Bounded<T>, a: T, b: T) -> Self {
+        use Bounded::{Finite, Infinity};
+
+        match (x, y) {
+            (Infinity, Infinity) => Self { x, y, a, b },
+            (Finite(x), Finite(y)) => {
+                if y.pow(2) != x.pow(3) + a * x + b {
+                    panic!("Elliptic Curve Error: {x}, {y} is not on curve.");
+                }
+                Self {
+                    x: Finite(x),
+                    y: Finite(y),
+                    a,
+                    b,
+                }
+            }
+            (_, _) => {
+                panic!(
+                    "Error: cannot create EcPoint; cannot have one discrete value and one infinity"
+                )
+            }
         }
-        if y.powi(2) != x.powi(3) + a * x + b {
-            panic!("Elliptic Curve Error: {x}, {y} is not on curve.");
-        }
-        Self { x, y, a, b }
     }
 }
 
-impl Display for Point {
+impl<T: EcRepresentable> Display for EcPoint<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Point({}, {})_{}_{}", self.x, self.y, self.a, self.b)
+        write!(f, "Point({}, {})_a:{}_b:{}", self.x, self.y, self.a, self.b)
     }
 }
 
-impl Add for Point {
+impl<T: EcRepresentable> Add for EcPoint<T> {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
+        use Bounded::{Finite, Infinity};
+
+        // Not on the same curve
         if self.a != rhs.a || self.b != rhs.b {
             panic!(
                 "Error: Elliptic curve addition failed because points are not on the same curve"
             );
         }
 
-        // Point + INFINITY = Point
-        if self.x == f64::INFINITY {
-            return rhs;
-        }
-
-        // Point + INFINITY = Point
-        if rhs.x == f64::INFINITY {
-            return self;
-        }
-
-        // Point + -Point = INFINITY
-        if self.x == rhs.x && self.y != rhs.y {
-            return Self {
-                x: f64::INFINITY,
-                y: f64::INFINITY,
+        match (self.x, self.y, rhs.x, rhs.y) {
+            // Infinity + Infinity = Infinity
+            (Infinity, Infinity, Infinity, Infinity) => Self {
+                x: Infinity,
+                y: Infinity,
                 a: self.a,
                 b: self.b,
-            };
-        }
-
-        // x1 != x2; use standard point addition
-        if self.x != rhs.x {
-            let s = (rhs.y - self.y) / (rhs.x - self.x);
-            let x = s.powi(2) - self.x - rhs.x;
-            let y = s * (self.x - x) - self.y;
-
-            return Self {
-                x,
-                y,
+            },
+            // Infinity + Point = Point
+            (Infinity, Infinity, Finite(x2), Finite(y2)) => Self {
+                x: Finite(x2),
+                y: Finite(y2),
                 a: self.a,
                 b: self.b,
-            };
-        }
-
-        // Point + itself = find tangent line intersection
-        if self == rhs {
-            let s = (3.0 * self.x.powi(2) + self.a) / (2.0 * self.y);
-            let x = (s.powi(2)) - (2.0 * self.x);
-            let y = s * (self.x - x) - self.y;
-
-            return Self {
-                x,
-                y,
+            },
+            // Point + Infinity = Point
+            (Finite(x1), Finite(x2), Infinity, Infinity) => Self {
+                x: Finite(x1),
+                y: Finite(x2),
                 a: self.a,
                 b: self.b,
-            };
-        }
-
-        if self == rhs && self.y == 0.0 {
-            return Self {
-                x: f64::INFINITY,
-                y: f64::INFINITY,
+            },
+            // Point + -Point = Infinity
+            (Finite(x1), Finite(y1), Finite(x2), Finite(y2)) if x1 == x2 && y1 != y2 => Self {
+                x: Infinity,
+                y: Infinity,
                 a: self.a,
                 b: self.b,
-            };
-        }
+            },
+            // x1 != x2 then use point addition
+            (Finite(x1), Finite(y1), Finite(x2), Finite(y2)) if x1 != x2 => {
+                let s = (y2 - y1) / (x2 - x1);
+                let x3 = s.pow(2) - x1 - x2;
+                let y3 = s * (x1 - x3) - y1;
 
-        panic!("Error: elliptic curve addition failed all conditions");
+                Self {
+                    x: Finite(x3),
+                    y: Finite(y3),
+                    a: self.a,
+                    b: self.b,
+                }
+            }
+            // Point + itself = find tangent line intersection
+            (Finite(x1), Finite(y1), Finite(x2), Finite(y2)) if x1 == x2 && y1 == y2 => {
+                let s = ((x1.pow(2)).scale(3) + self.a) / (y1.scale(2));
+                let x3 = s.pow(2) - x1.scale(2);
+                let y3 = s * (x1 - x3) - y1;
+
+                Self {
+                    x: Finite(x3),
+                    y: Finite(y3),
+                    a: self.a,
+                    b: self.b,
+                }
+            }
+            // Apex point of curve
+            (Finite(x1), Finite(y1), Finite(x2), Finite(y2))
+                if x1 == x2 && y1 == y2 && y1.is_zero() =>
+            {
+                Self {
+                    x: Infinity,
+                    y: Infinity,
+                    a: self.a,
+                    b: self.b,
+                }
+            }
+            // Addition not defined for any other conditions
+            (_, _, _, _) => panic!("Error: elliptic curve addition not defined for this condition"),
+        }
     }
 }
 
@@ -115,12 +214,6 @@ impl Add for Point {
 ***************
 * this is purely for convenience
 * */
-#[macro_export]
-macro_rules! ec_point {
-    ($x:expr, $y:expr, $a:expr, $b:expr) => {
-        Point::new(($x), ($y), ($a), ($b))
-    };
-}
 
 /*
 *********
@@ -129,30 +222,31 @@ macro_rules! ec_point {
 * */
 #[cfg(test)]
 mod tests {
+    use Bounded::{Finite, Infinity};
     use core::f64;
 
     use super::*;
 
     #[test]
     fn test_point() {
-        let point = Point::new(-1.0, -1.0, 5.0, 7.0);
+        let point = EcPoint::new(Finite(-1.0), Finite(-1.0), 5.0, 7.0);
     }
 
     #[test]
     fn test_infinity_point() {
-        let point = Point::new(f64::INFINITY, f64::INFINITY, 5.0, 7.0);
+        let point = EcPoint::new(Infinity, Infinity, 5.0, 7.0);
     }
 
     #[test]
     #[should_panic]
     fn test_point_not_on_curve() {
-        let point = Point::new(-1.0, -2.0, 5.0, 7.0);
+        let point = EcPoint::new(Finite(-1.0), Finite(-2.0), 5.0, 7.0);
     }
 
     #[test]
     fn test_point_eq() {
-        let p1 = Point::new(-1.0, -1.0, 5.0, 7.0);
-        let p2 = Point::new(-1.0, -1.0, 5.0, 7.0);
+        let p1 = EcPoint::new(Finite(-1.0), Finite(-1.0), 5.0, 7.0);
+        let p2 = EcPoint::new(Finite(-1.0), Finite(-1.0), 5.0, 7.0);
         assert_eq!(p1, p1);
         assert_eq!(p2, p2);
         assert_eq!(p1, p2);
@@ -161,12 +255,12 @@ mod tests {
 
     #[test]
     fn test_point_ne() {
-        let p1 = Point::new(-1.0, -1.0, 5.0, 7.0);
-        let p2 = Point::new(-1.0, 1.0, 5.0, 7.0);
-        let p3 = Point::new(2.0, 5.0, 5.0, 7.0);
-        let p4 = Point::new(2.0, -5.0, 5.0, 7.0);
-        let p5 = Point::new(3.0, 7.0, 5.0, 7.0);
-        let p6 = Point::new(3.0, -7.0, 5.0, 7.0);
+        let p1 = EcPoint::new(Finite(-1.0), Finite(-1.0), 5.0, 7.0);
+        let p2 = EcPoint::new(Finite(-1.0), Finite(1.0), 5.0, 7.0);
+        let p3 = EcPoint::new(Finite(2.0), Finite(5.0), 5.0, 7.0);
+        let p4 = EcPoint::new(Finite(2.0), Finite(-5.0), 5.0, 7.0);
+        let p5 = EcPoint::new(Finite(3.0), Finite(7.0), 5.0, 7.0);
+        let p6 = EcPoint::new(Finite(3.0), Finite(-7.0), 5.0, 7.0);
         assert_ne!(p1, p2);
         assert_ne!(p3, p4);
         assert_ne!(p5, p6);
@@ -174,9 +268,9 @@ mod tests {
 
     #[test]
     fn test_infinity_add() {
-        let p1 = Point::new(-1.0, -1.0, 5.0, 7.0);
-        let p2 = Point::new(-1.0, 1.0, 5.0, 7.0);
-        let inf = Point::new(f64::INFINITY, f64::INFINITY, 5.0, 7.0);
+        let p1 = EcPoint::new(Finite(-1.0), Finite(-1.0), 5.0, 7.0);
+        let p2 = EcPoint::new(Finite(-1.0), Finite(1.0), 5.0, 7.0);
+        let inf = EcPoint::new(Infinity, Infinity, 5.0, 7.0);
 
         assert_eq!(p1 + inf, p1);
         assert_eq!(inf + p2, p2);
@@ -185,27 +279,17 @@ mod tests {
 
     #[test]
     fn test_add_where_x_ne() {
-        let p1 = Point::new(2.0, 5.0, 5.0, 7.0);
-        let p2 = Point::new(-1.0, -1.0, 5.0, 7.0);
-        assert_eq!(p1 + p2, Point::new(3.0, -7.0, 5.0, 7.0));
+        let p1 = EcPoint::new(Finite(2.0), Finite(5.0), 5.0, 7.0);
+        let p2 = EcPoint::new(Finite(-1.0), Finite(-1.0), 5.0, 7.0);
+        assert_eq!(p1 + p2, EcPoint::new(Finite(3.0), Finite(-7.0), 5.0, 7.0));
     }
 
     #[test]
     fn test_add_point_to_itself() {
-        let point = Point::new(-1.0, -1.0, 5.0, 7.0);
-        assert_eq!(point + point, Point::new(18.0, 77.0, 5.0, 7.0));
-    }
-
-    #[test]
-    fn test_macro() {
-        let p1 = ec_point!(3.0, 7.0, 5.0, 7.0);
-        let p2 = Point::new(3.0, 7.0, 5.0, 7.0);
-        assert_eq!(p1, p2);
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_macro_fail() {
-        let p1 = ec_point!(3.0, 8.0, 5.0, 7.0);
+        let point = EcPoint::new(Finite(-1.0), Finite(-1.0), 5.0, 7.0);
+        assert_eq!(
+            point + point,
+            EcPoint::new(Finite(18.0), Finite(77.0), 5.0, 7.0)
+        );
     }
 }
